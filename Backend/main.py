@@ -1,7 +1,7 @@
 import random
 import pywhatkit as kit
 from fastapi import FastAPI, HTTPException, Depends, status
-from pydantic import BaseModel
+from pydantic import BaseModel,Field
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from fastapi.security import OAuth2PasswordBearer
@@ -75,7 +75,6 @@ def verify_otp(request: OTPVerifyRequest):
     if stored_otp is None or stored_otp != request.otp:
         raise HTTPException(status_code=401, detail="Invalid OTP")
     access_token = create_access_token({"sub": request.phone_number})
-    # Optionally delete OTP after verification
     otp_store.pop(request.phone_number, None)
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -90,6 +89,7 @@ db=client["hospital"]
 patients=db["patients"]
 doctors=db["doctors"]
 appointments = db["appointments"]
+
 all_patient_ids = [str(doc['_id']) for doc in patients.find({}, {'_id': 1})]
 all_doctors_ids = [str(doc['_id']) for doc in doctors.find({},{'_id':1})]
 all_appoinment_ids = [str(doc['_id'] for doc in appointments.find({},{'_id':1}))]
@@ -155,7 +155,7 @@ doctor_doc = {
         "email": "john.doe@hospital.com"
     },
     "experience_years": 15,
-    "patients": [],  # List of patient ObjectIds as per your system
+    "patients": all_patient_ids,  # List of patient ObjectIds as per your system
     "schedule": {
         "monday": "9am-5pm",
         "tuesday": "9am-5pm",
@@ -165,15 +165,6 @@ doctor_doc = {
     "status": "Active",
     "created_at": datetime.utcnow(),
     "updated_at": datetime.utcnow()
-}
-
-new_appointment = {
-    "doctor_id": all_doctors_ids,    # Use actual ObjectId in production
-    "patient_id": all_patient_ids,  # Use actual ObjectId in production
-    "appointment_date": "2025-09-14:30:00",
-    "slot_number": 2,
-    "created_at": "2025-09-15T13:00:00",
-    "updated_at": "2025-09-15T13:00:00"
 }
 
 def insert_doctor(doctor_doc):
@@ -205,3 +196,35 @@ def delete_patient(patient_id):
 def delete_appointment(appointment_id):
     result = appointments.delete_one({"_id": ObjectId(appointment_id)})
     return result.deleted_count
+
+class AppointmentRequest(BaseModel):
+    patient_id: str = Field(...)
+    doctor_id: str = Field(...)  # Assuming user selects doctor or system assigns
+    appointment_date: datetime = Field(...)
+
+@app.post("/book_appointment/")
+async def book_appointment(request: AppointmentRequest):
+    slot_start = request.appointment_date
+    slot_end = slot_start + timedelta(minutes=15)
+
+    conflict = db.appointments.find_one({
+        "doctor_id": request.doctor_id,
+        "appointment_date": {"$lt": slot_end},
+        "$expr": {"$gte": [ { "$add": ["$appointment_date", 15 * 60 * 1000] }, slot_start ]},
+        "status": "Booked"
+    })
+    if conflict:
+        raise HTTPException(status_code=409, detail="Appointment slot not available")
+    
+    new_appointment = {
+        "doctor_id": request.doctor_id,
+        "patient_id": request.patient_id,
+        "appointment_date": request.appointment_date,
+        "status": "Booked",
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+
+    result = db.appointments.insert_one(new_appointment)
+
+    return {"appointment_id": str(result.inserted_id), "message": "Appointment successfully booked"}
