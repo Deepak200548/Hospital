@@ -203,7 +203,7 @@ class AppointmentRequest(BaseModel):
     appointment_date: datetime = Field(...)
 
 @app.post("/book_appointment/")
-async def book_appointment(request: AppointmentRequest):
+async def book_appointment(request: AppointmentRequest,current_user: dict = Depends(get_current_user)):
     slot_start = request.appointment_date
     slot_end = slot_start + timedelta(minutes=15)
 
