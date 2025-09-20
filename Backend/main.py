@@ -228,3 +228,28 @@ async def book_appointment(request: AppointmentRequest,current_user: dict = Depe
     result = db.appointments.insert_one(new_appointment)
 
     return {"appointment_id": str(result.inserted_id), "message": "Appointment successfully booked"}
+from fastapi import Body
+
+class AppointmentApproveRequest(BaseModel):
+    appointment_id: str = Field(...)
+
+@app.post("/approve_appointment/")
+async def approve_appointment(
+    request: AppointmentApproveRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    # Ensure appointment exists
+    appointment = appointments.find_one({"_id": ObjectId(request.appointment_id)})
+    if appointment is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    
+    # Update appointment status
+    result = appointments.update_one(
+        {"_id": ObjectId(request.appointment_id)},
+        {"$set": {"status": "Approved", "updated_at": datetime.utcnow()}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="Unable to approve appointment")
+    
+    return {"message": "Appointment approved successfully"}
+
